@@ -38,6 +38,8 @@
 
 #define PF4 (*((volatile uint32_t *) 0x4005D040))
 
+long balance = 0;
+
 void Output_Init(void);
 void GPIO_Init(void){  
   SYSCTL_RCGCGPIO_R |= 0x08;        // 1) activate port D
@@ -56,13 +58,13 @@ uint32_t PortD_Input(void){
 	return (GPIO_PORTD_DATA_R);
 }	
 void GPIOF_Init(void){  
-  SYSCTL_RCGCGPIO_R |= 0x00000020;        // 1) activate port D
-  while((SYSCTL_PRGPIO_R&0x00000020)==0){};   // allow time for clock to stabilize
-  GPIO_PORTF_LOCK_R = 0x4C4F434B;                                  // 2) no need to unlock PD3-0
-	GPIO_PORTF_CR_R = 0x10;
-  GPIO_PORTF_DIR_R |= 0xFF;         // 5) make PD3-0 out 
-  GPIO_PORTF_PUR_R = 0x00;					// Inputs get PUR
-  GPIO_PORTF_DEN_R |= 0xFF;         // 7) enable digital I/O on PD3-0
+    SYSCTL_RCGCGPIO_R |= 0x00000020;        // 1) activate port D
+    while((SYSCTL_PRGPIO_R&0x00000020)==0){};   // allow time for clock to stabilize
+    GPIO_PORTF_LOCK_R = 0x4C4F434B;                                  // 2) no need to unlock PD3-0
+    GPIO_PORTF_CR_R = 0x10;
+    GPIO_PORTF_DIR_R |= 0xFF;         // 5) make PD3-0 out 
+    GPIO_PORTF_PUR_R = 0x00;					// Inputs get PUR
+    GPIO_PORTF_DEN_R |= 0xFF;         // 7) enable digital I/O on PD3-0
 }
 
 uint32_t PortF_Input(void) {
@@ -70,7 +72,7 @@ uint32_t PortF_Input(void) {
 }
 void PortF_Output(uint32_t data) {
 	GPIO_PORTF_DATA_R = data;
-}	
+}
 
 /***************
 	SENSOR TRIGGER 
@@ -128,32 +130,56 @@ void delay_loop(uint32_t del){
 
 
 void objectDetect(uint32_t range){
-	
-	if (range <18){
-		PortF_Output(0x02);
-		//PortF_Output(0x04);
-		delay_loop(500000);
-	} else if ((range<40) &&(range >18)){
-		PortF_Output(0x08);
+    if (range <18){
+        balance++;
+
+        // If position is tested to be under 18 more than once
+        // Set PF3 high so that speaker will sound
+        if (balance > 1){
+            PortF_Output(0x06);
+
+            // If happens often reset so that lag is less afterwards
+            if (balance > 10)
+                balance = 10;
+        } else {
+            // Only display warning light since value is in between
+            // Being a warning and an alarm
+            PortF_Output(0x08);
+        }
+
+        //PortF_Output(0x04);
+
+    } else if ((range<40) &&(range >18)){
+        balance--;
 		
-	} else {
-		PortF_Output(0x00);
+        // If position is tested under 18 more than once, keep
+        // sending to PF3 so that speaker doesnt flicker
+        if (balance > 0)
+            PortF_Output(0x0C);
+        else {
+            // Balance is out of range, reset so that alarm occurs sooner
+            // than if it were -10 (11 cycles needed to trigger alarm)
+            balance = 0;
+            PortD_Output(0x08);
+        }
 		
-	}
+    } else {
+        PortF_Output(0x00);
+    }
 }
 
 int main(void){
-	Output_Init();
-	printf("*****BSNS*******\nBlind Spot Notification System\n");
-  GPIO_Init();
-  GPIOF_Init();
-	while(1){
-		uint32_t trial;
-		sensorTrig();
-		trial = distance();
-		objectDetect(trial);
-		printf("distance = %d \n", trial);
-		delay_loop(8000);
+    Output_Init();
+    printf("*****BSNS*******\nBlind Spot Notification System\n");
+    GPIO_Init();
+    GPIOF_Init();
+    while(1){
+        uint32_t trial;
+        sensorTrig();
+        trial = distance();
+        objectDetect(trial);
+        printf("distance = %d \n", trial);
+        delay_loop(8000);
 	}
 
 }
